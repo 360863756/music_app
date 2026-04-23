@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+
+# 数据库 dump：大且含真实数据，不进 git
+database/*.sql
+!database/init.sql

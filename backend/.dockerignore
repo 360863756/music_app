@@ -1,0 +1,10 @@
+node_modules
+dist
+.env
+.env.*
+*.log
+.DS_Store
+
+# 数据库 dump 只在运行时由 compose 挂载到 MySQL 容器
+# 不要带进 API 镜像
+database/

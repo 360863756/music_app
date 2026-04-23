@@ -1,0 +1,65 @@
+# 生产部署：后端 API + MySQL 一体化
+# 使用方式（服务器上）：
+#   1) 复制 .env.example 为 .env 并填好密码
+#   2) 把本地 mysqldump 出来的 .sql 放到 ./database/dump/  （首次启动自动导入）
+#   3) docker compose up -d --build
+#   4) docker compose logs -f api    # 确认启动成功
+# 访问：http://<server-ip>:8666/api/health
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: run_app_db
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=caching_sha2_password
+    environment:
+      # 只用 root 账号给后端使用；若要单独业务账号，再加 MYSQL_USER / MYSQL_PASSWORD
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    volumes:
+      # 数据文件持久化；升级/重建容器不丢数据。想"重新从 dump 初始化"时：
+      #   docker compose down -v   # 会把这个卷也删掉，下次 up 时再次跑 initdb
+      - mysql_data:/var/lib/mysql
+      # 首次启动、且数据目录为空时，MySQL 会按文件名顺序执行该目录下的 *.sql / *.sh
+      # 约定：
+      #   database/init.sql       → 建库（幂等）
+      #   database/10-dump.sql    → 从本地 mysqldump --databases run_app 导出的完整 schema + 数据
+      # 注意：MySQL 不会递归子目录，所以 dump 要直接放 database/ 下
+      - ./database:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # CMD-SHELL + 双 $$ 让 compose 不做变量替换，由容器内 shell 读取 MYSQL_ROOT_PASSWORD
+      # 这样密码里有特殊字符也不会把命令拼坏
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    # 默认不对外暴露；需要远程连数据库再打开下面的 ports
+    # ports:
+    #   - "3306:3306"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: run_app_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 8666
+      MYSQL_HOST: db
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      JWT_SECRET: ${JWT_SECRET}
+    ports:
+      - "8666:8666"
+
+volumes:
+  mysql_data:

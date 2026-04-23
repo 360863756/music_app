@@ -1,0 +1,13 @@
+# macOS / zip 解压残留
+__MACOSX/
+.DS_Store
+
+# 本地打包备份（用源码与 lockfile 重建环境即可）
+*.tar.gz
+
+# 本机调试日志
+debug.log
+*.log
+
+# 大体积样本压缩包（若需版本化可改用 Git LFS 或只保留目录其一）
+初步可用BPM数据.zip
