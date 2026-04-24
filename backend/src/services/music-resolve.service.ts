@@ -1,11 +1,11 @@
 /**
- * 六大音乐平台"按歌名+歌手"解析成可深链到具体歌曲的 URL。
+ * 五大音乐平台"按歌名+歌手"解析成可深链到具体歌曲的 URL。
  *
  * 设计要点：
  *  - 每个平台一个 resolver，失败（超时 / 404 / 没搜到）返回 null，让上层兜底到"拉起首页 + 剪贴板"。
  *  - 所有对外调用都带 6s 超时 + 浏览器 UA + Referer，不然部分接口会直接 403。
- *  - 国内四家用的都是"非官方但公开抓包可得"的搜索接口，以下任何一个 400/500 了，平台改 API
- *    是常事，不要影响其它平台；所以 resolveAll 用 Promise.allSettled 各干各的。
+ *  - 国内三家（网易/QQ/酷狗）用的都是"非官方但公开抓包可得"的搜索接口，以下任何一个 400/500 了，
+ *    平台改 API 是常事，不要影响其它平台；所以 resolveAll 用 Promise.allSettled 各干各的。
  *
  * 产出两种链接：
  *   - deepLink: 原生 scheme / 能触发 App 跳转的 https Universal Link（首选）
@@ -13,6 +13,14 @@
  *
  * 返回格式（成功）：{ platform, deepLink, webUrl, songId, title, artist }
  * 返回格式（失败）：null
+ *
+ * 历史：曾支持酷我和汽水音乐，均已移除。
+ *   - 酷我：所有 kwmusic:// 私有 scheme 被 EntryActivity 吞参数恢复"上次播放"，
+ *     m.kuwo.cn 无 App Link，H5 搜索页不读 URL query，剪贴板不被识别 —— 没有
+ *     官方 SDK 的情况下任何"直达某首歌"的尝试都会"播错歌"，产品体验为负；
+ *   - 汽水：无公开搜索 API 拿不到歌曲 ID，无公开 scheme，首页是抖音式单曲沉浸
+ *     播放页，launchByPackage 只会让用户听到它算法推荐的歌，不是用户想听的。
+ * 两个平台后续若接入官方 SDK / TME 商务合作，再补回 resolver。
  */
 
 import axios from 'axios';
@@ -22,8 +30,7 @@ export type MusicPlatform =
   | 'spotify'
   | 'netease'
   | 'qq'
-  | 'kugou'
-  | 'kuwo';
+  | 'kugou';
 
 export type ResolvedSong = {
   platform: MusicPlatform;
@@ -216,8 +223,6 @@ const KUGOU_PACKAGES = [
   'com.kugou.android.lite',    // 酷狗音乐极速版
   'com.kugou.android.elder',   // 酷狗音乐大字版
 ];
-const KUWO_PACKAGES = ['cn.kuwo.player'];
-
 async function resolveNetease(title: string, artist: string): Promise<ResolvedSong | null> {
   const q = buildQuery(title, artist);
   if (!q) return null;
@@ -327,9 +332,10 @@ async function resolveQQ(title: string, artist: string): Promise<ResolvedSong | 
 //   全部都 ActivityNotFound 时，走 m.kugou.com 移动版歌曲详情页（带"在App
 //   中打开"横幅）作为最终兜底。
 // ============================================================================
-/** 酷狗候选 scheme 列表（所有 scheme 都只拉起 App 首页，不带具体歌曲参数 —
- *  拉起后配合前端剪贴板粘贴即可。任何 bare 形式能注册成功就算赢）*/
-const KUGOU_SCHEMES = ['kgmusic://', 'kugouURL://', 'kugou://'];
+/** 酷狗候选 scheme（裸 scheme 仅用于「能拉起 App 即可」的降级）。
+ *  `kgmusic://` 在多数机型上未注册 Activity（恒 ActivityNotFound），与 dumpsys
+ *  实采主包 scheme 也不一致，故不再列入，减少无效日志。 */
+const KUGOU_SCHEMES = ['kugou://', 'kugouURL://'];
 
 /**
  * mobilecdn 搜索单条里常有 `group: [...]`：顶层 `hash` 往往是“聚合/占位”，真正
@@ -408,6 +414,63 @@ function kugouPlayoneQueryVariants(
     out.push(q);
   }
   return out;
+}
+
+/**
+ * 外部 App 只带 hash 拉起 `start.weixin?type=playone` 时，部分酷狗版本不会再去
+ * 拉曲库文案，UI 会把 **type 的值当成歌名**（显示成「playone」）、歌手显示「未知歌手」。
+ * 在 query 末尾补上展示用参数（与 mobilecdn 的 `filename` 习惯「歌手 - 歌名」一致），
+ * 让客户端有兜底标题；具体键名多试几种（未公开文档，不同版本可能只认其一）。
+ */
+function expandKugouPlayoneQueriesWithDisplayMeta(
+  playoneQs: string[],
+  metaTitle: string,
+  metaArtist: string,
+): string[] {
+  const t = String(metaTitle || '').trim();
+  const a = String(metaArtist || '').trim();
+  if (!t && !a) return [...playoneQs];
+  const st = encodeURIComponent(t);
+  const sa = encodeURIComponent(a);
+  const fn = encodeURIComponent(a && t ? `${a} - ${t}` : t || a);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (s: string) => {
+    if (seen.has(s)) return;
+    seen.add(s);
+    out.push(s);
+  };
+  // 追加几组「分享来源/场景」参数：一些酷狗版本只在识别为合法分享后才会
+  // 去曲库拉标题/歌手，否则播放栏用 type/hash 占位。以下参数来自公开的
+  // 酷狗 H5 分享链接和抓包：都非签名字段，单独加不会破坏播放，只是某些
+  // 版本可能以此触发“是分享→补全 metadata”逻辑。
+  const shareSuffixes = [
+    'sharefrom=wx&from=wx',
+    'sharefrom=h5&from=share',
+    'source=share&from=h5',
+    'click_type=1&jumptype=playsong',
+    'scene=share_song',
+    '',
+  ];
+  for (const q of playoneQs) {
+    for (const suffix of shareSuffixes) {
+      const qs = suffix ? `${q}&${suffix}` : q;
+      // 优先 filename（酷狗曲库/列表常用「歌手 - 歌名」），再 songname 两套大小写
+      push(`${qs}&filename=${fn}`);
+      push(`${qs}&songname=${st}&singername=${sa}`);
+      push(`${qs}&songName=${st}&singerName=${sa}`);
+      push(qs);
+    }
+  }
+  return out;
+}
+
+function kugouPlayoneQueryHasDisplayMeta(pq: string): boolean {
+  return (
+    pq.includes('filename=') ||
+    pq.includes('songname=') ||
+    pq.includes('songName=')
+  );
 }
 
 async function resolveKugou(title: string, artist: string): Promise<ResolvedSong | null> {
@@ -514,23 +577,62 @@ async function resolveKugou(title: string, artist: string): Promise<ResolvedSong
     const albumAudioId =
       s.album_audio_id != null && s.album_audio_id !== '' ? String(s.album_audio_id) : '';
     const audioId = s.audio_id != null && s.audio_id !== '' ? String(s.audio_id) : '';
-    const playoneQs = kugouPlayoneQueryVariants(hash, albumId, albumAudioId, audioId);
+    // 先算展示名，用于深链 query 兜底（避免 App 把 type=playone 当歌名）
+    const userTitle = (title || '').trim();
+    const userArtist = (artist || '').trim();
+    const outTitle =
+      bestScore >= 4 && userTitle !== ''
+        ? userTitle
+        : String(s.songname || s.filename || title).trim() || title;
+    const outArtist =
+      bestScore >= 4 && userArtist !== ''
+        ? userArtist
+        : String(s.singername || artist).trim() || artist;
+
+    const playoneQs = expandKugouPlayoneQueriesWithDisplayMeta(
+      kugouPlayoneQueryVariants(hash, albumId, albumAudioId, audioId),
+      outTitle,
+      outArtist,
+    );
     const albumQS = albumId ? `&album_id=${albumId}` : '';
     const audioQS = albumAudioId ? `&album_audio_id=${albumAudioId}` : '';
     const songQS = audioId ? `&audio_id=${audioId}` : '';
     const kgSchemes = ['kugou', 'kugouapp', 'kugouURL', 'kugouurl', 'kmah5', 'kmaout', 'kugou11'];
     const inAppSchemes: string[] = [];
-    // (1) 所有 query 变体 × 7 种 scheme × start.weixin（优先带 album_audio_id 的完整串）
+    // (1) playone query × scheme：带展示参数的 URL 只配 `kugou://`（主包实测 OK），
+    //     避免 7 倍 × 多 meta 变体 → 两百多条无意义重复；裸 query 仍走 7 scheme 兜底极速版等。
     for (const pq of playoneQs) {
-      for (const sc of kgSchemes) {
+      const schemes = kugouPlayoneQueryHasDisplayMeta(pq) ? ['kugou'] : kgSchemes;
+      for (const sc of schemes) {
         inAppSchemes.push(`${sc}://start.weixin?${pq}`);
       }
     }
-    // (2) dump 里的 host "kugou.app" —— 少量猜测路径（参数与 playone 对齐）
-    inAppSchemes.push(`kugou://kugou.app/song?hash=${hash}${audioQS}${songQS}${albumQS}`);
-    inAppSchemes.push(`kugou://kugou.app/play?hash=${hash}${audioQS}${songQS}${albumQS}`);
-    inAppSchemes.push(`kugou://kugou.app?type=song&hash=${hash}${audioQS}${songQS}${albumQS}`);
-    inAppSchemes.push(`kugou://kugou.app?hash=${hash}${audioQS}${songQS}${albumQS}`);
+    // (2) 非 start.weixin 的 host / path 候选：官方 H5 SDK 里对外 API 叫
+    //     `playSong({hash, album_audio_id})`；酷狗客户端同样的 action 名
+    //     在内部 router 里很可能也有，试几种拼法。若其中任何一条被某版本
+    //     routing 支持，拉起后自带 metadata 的概率更高（因为走的是正规点
+    //     播入口而非微信分享 handler）。
+    const shareQsFull = `hash=${hash}${audioQS}${songQS}${albumQS}`;
+    const metaQs = (() => {
+      const t = encodeURIComponent(outTitle || '');
+      const a = encodeURIComponent(outArtist || '');
+      const fn = encodeURIComponent(outArtist && outTitle ? `${outArtist} - ${outTitle}` : outTitle || outArtist);
+      return `filename=${fn}&songname=${t}&singername=${a}`;
+    })();
+    inAppSchemes.push(`kugou://playSong?${shareQsFull}&${metaQs}`);
+    inAppSchemes.push(`kugou://playsong?${shareQsFull}&${metaQs}`);
+    inAppSchemes.push(`kugou://mixsong?${shareQsFull}&${metaQs}`);
+    inAppSchemes.push(`kugou://song?${shareQsFull}&${metaQs}`);
+    // dump 里的 host "kugou.app" —— 少量猜测路径（参数与 playone 对齐）
+    inAppSchemes.push(`kugou://kugou.app/song?${shareQsFull}&${metaQs}`);
+    inAppSchemes.push(`kugou://kugou.app/play?${shareQsFull}&${metaQs}`);
+    inAppSchemes.push(`kugou://kugou.app?type=song&${shareQsFull}&${metaQs}`);
+    inAppSchemes.push(`kugou://kugou.app?${shareQsFull}&${metaQs}`);
+    // (2.5) 「酷狗自家短链」路径 —— 过去 `m.kugou.com` 进的是内部 WebView 加载
+    //       失败，但 `t.kugou.com`（真分享短链域名）在部分版本走的是 share
+    //       handler，不是 WebView；这条路若命中，metadata 更可能正常。
+    inAppSchemes.push(`https://t.kugou.com/song.html?hash=${hash}${audioQS}${songQS}${albumQS}`);
+    inAppSchemes.push(`https://t.kugou.com/song?hash=${hash}${audioQS}${songQS}${albumQS}`);
     // (3) 所有 7 种 scheme × start.weixin/type=song（部分版本只拉首页，作末尾兜底）
     for (const sc of kgSchemes) {
       inAppSchemes.push(`${sc}://start.weixin?type=song&hash=${hash}${audioQS}${songQS}${albumQS}`);
@@ -545,91 +647,11 @@ async function resolveKugou(title: string, artist: string): Promise<ResolvedSong
       inAppSchemes,
       webUrl: mobileSongUrl,
       songId: hash,
-      title: s.songname || s.filename || title,
-      artist: s.singername || artist,
+      title: outTitle,
+      artist: outArtist,
     };
   } catch (e: any) {
     console.warn('[kugou] error:', e?.code || e?.message || e, '→ fallback to mobile search page');
-    return fallbackWithoutSongId;
-  }
-}
-
-// ============================================================================
-// 酷我 —— www.kuwo.cn 需要先拿 kw_token cookie 才能查
-//   实测 `kwapp://open?...` 能拉起 App 但参数被忽略只到首页 —— 这其实已经足够
-//   了，配合剪贴板就能点播。再加 `kuwo://` 作为候选。
-// ============================================================================
-const KUWO_SCHEMES = ['kwapp://open', 'kuwo://'];
-
-async function resolveKuwo(title: string, artist: string): Promise<ResolvedSong | null> {
-  const q = buildQuery(title, artist);
-  if (!q) return null;
-  const enc = encodeURIComponent(q);
-  const fallbackWithoutSongId: ResolvedSong = {
-    platform: 'kuwo',
-    deepLink: KUWO_SCHEMES[0],
-    schemeCandidates: KUWO_SCHEMES,
-    packageNames: KUWO_PACKAGES,
-    webUrl: `https://m.kuwo.cn/search?key=${enc}`,
-    songId: '',
-    title,
-    artist,
-  };
-  try {
-    // 第 1 步：拿 kw_token cookie
-    const home = await axios.get('http://www.kuwo.cn/', {
-      timeout: HTTP_TIMEOUT_MS,
-      headers: { 'User-Agent': UA },
-      validateStatus: () => true,
-    });
-    const setCookie = home.headers['set-cookie'] || [];
-    let kwToken = '';
-    for (const c of setCookie as string[]) {
-      const m = /kw_token=([^;]+)/.exec(c);
-      if (m) {
-        kwToken = m[1];
-        break;
-      }
-    }
-    if (!kwToken) {
-      console.warn('[kuwo] no kw_token → fallback to search scheme');
-      return fallbackWithoutSongId;
-    }
-
-    // 第 2 步：搜歌
-    const resp = await axios.get(
-      'http://www.kuwo.cn/api/www/search/searchMusicBykeyWord',
-      {
-        params: { key: q, pn: 1, rn: 1, httpsStatus: 1 },
-        timeout: HTTP_TIMEOUT_MS,
-        headers: {
-          'User-Agent': UA,
-          Referer: `http://www.kuwo.cn/search/list?key=${enc}`,
-          csrf: kwToken,
-          Cookie: `kw_token=${kwToken}`,
-        },
-      },
-    );
-    const list = resp.data?.data?.list;
-    const s = Array.isArray(list) ? list[0] : null;
-    if (!s || !s.rid) {
-      console.warn('[kuwo] no result for', q, '→ fallback to search scheme');
-      return fallbackWithoutSongId;
-    }
-    // 移动版歌曲详情页：有"在App中打开"的横幅
-    const mobileSongUrl = `https://m.kuwo.cn/newh5app/play_detail/${s.rid}`;
-    return {
-      platform: 'kuwo',
-      deepLink: KUWO_SCHEMES[0],
-      schemeCandidates: KUWO_SCHEMES,
-      packageNames: KUWO_PACKAGES,
-      webUrl: mobileSongUrl,
-      songId: String(s.rid),
-      title: s.name || title,
-      artist: s.artist || artist,
-    };
-  } catch (e: any) {
-    console.warn('[kuwo] error:', e?.code || e?.message || e, '→ fallback to search scheme');
     return fallbackWithoutSongId;
   }
 }
@@ -643,7 +665,6 @@ const RESOLVERS: Record<MusicPlatform, (t: string, a: string) => Promise<Resolve
   netease: resolveNetease,
   qq: resolveQQ,
   kugou: resolveKugou,
-  kuwo: resolveKuwo,
 };
 
 export async function resolveOne(
@@ -661,7 +682,7 @@ export async function resolveAll(
   title: string,
   artist: string,
 ): Promise<Partial<Record<MusicPlatform, ResolvedSong>>> {
-  const keys: MusicPlatform[] = ['apple', 'spotify', 'netease', 'qq', 'kugou', 'kuwo'];
+  const keys: MusicPlatform[] = ['apple', 'spotify', 'netease', 'qq', 'kugou'];
   const results = await Promise.allSettled(
     keys.map((k) => RESOLVERS[k](title, artist)),
   );

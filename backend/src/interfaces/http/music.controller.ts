@@ -2,11 +2,11 @@
  * 音乐深链解析 HTTP 控制器
  *
  * 路由：
- *   GET /api/music/resolve?title=xxx&artist=xxx&platform=apple|spotify|netease|qq|kugou|kuwo
+ *   GET /api/music/resolve?title=xxx&artist=xxx&platform=apple|spotify|netease|qq|kugou
  *     单平台解析：返回 { ok, data: ResolvedSong | null }
  *
  *   GET /api/music/resolve-all?title=xxx&artist=xxx
- *     六家一次性并发解析：返回 { ok, data: { apple?, spotify?, netease?, qq?, kugou?, kuwo? } }
+ *     五家一次性并发解析：返回 { ok, data: { apple?, spotify?, netease?, qq?, kugou? } }
  *
  * 失败策略：
  *   - 参数缺失 → 400
@@ -26,7 +26,6 @@ const VALID_PLATFORMS: MusicPlatform[] = [
   'netease',
   'qq',
   'kugou',
-  'kuwo',
 ];
 
 export async function resolveMusicDeeplink(req: Request, res: Response) {

@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "seed": "ts-node --transpile-only src/scripts/seedTracks.ts",
-    "import:csv": "ts-node --transpile-only src/scripts/importTracksCsv.ts"
+    "import:csv": "ts-node --transpile-only src/scripts/importTracksCsv.ts",
+    "reset:users": "ts-node --transpile-only src/scripts/resetUsers.ts"
   },
   "keywords": [],
   "author": "",
