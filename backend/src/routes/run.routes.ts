@@ -18,6 +18,8 @@ router.get('/tracks/:id', run.getTrack);
 router.post('/bpm/classify', run.classifyBpm);
 router.get('/onboarding/reference-tracks', run.onboardingReferenceTracks);
 router.post('/onboarding/recommend', run.onboardingRecommend);
+// 未入库歌名 → iTunes 试听 → BPM 检测 → 入库
+router.post('/probe-track', run.probeTrackHandler);
 
 // 听一段音频 → 推荐节奏类似的歌；登录可选（匿名也能用）
 router.post(
