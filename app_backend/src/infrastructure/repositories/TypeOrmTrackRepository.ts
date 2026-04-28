@@ -62,6 +62,8 @@ export class TypeOrmTrackRepository implements ITrackRepository {
       `ref=${criteria.includeReference === true ? '1' : '0'}`,
       `bmin=${criteria.bpmMin ?? ''}`,
       `bmax=${criteria.bpmMax ?? ''}`,
+      // recommend 同样会改变 id 集合，必须分桶；否则推荐池会读到未过滤英文/灰区 BPM 的缓存
+      `rec=${criteria.recommend === true ? '1' : '0'}`,
     ];
     return parts.join('|');
   }
@@ -81,6 +83,14 @@ export class TypeOrmTrackRepository implements ITrackRepository {
     if (criteria.language?.trim()) qb.andWhere('t.language = :lang', { lang: criteria.language.trim() });
     if (criteria.bpmMin != null) qb.andWhere('t.bpm >= :bmin', { bmin: criteria.bpmMin });
     if (criteria.bpmMax != null) qb.andWhere('t.bpm <= :bmax', { bmax: criteria.bpmMax });
+    if (criteria.recommend === true) {
+      // 推荐位过滤：英文歌 & BPM ∈ [120,140] 灰区不主动推
+      qb.andWhere('t.language <> :recExLang', { recExLang: 'en' });
+      qb.andWhere('(t.bpm < :recBpmLo OR t.bpm > :recBpmHi)', {
+        recBpmLo: 120,
+        recBpmHi: 140,
+      });
+    }
     const raws = await qb.getRawMany<{ id: number }>();
     const ids = raws.map((r) => r.id);
     this.randomPools.set(key, { ids, expireAt: now + RANDOM_POOL_TTL_MS });
@@ -152,6 +162,13 @@ export class TypeOrmTrackRepository implements ITrackRepository {
     }
     if (criteria.bpmMax != null) {
       qb.andWhere('t.bpm <= :bmax', { bmax: criteria.bpmMax });
+    }
+    if (criteria.recommend === true) {
+      qb.andWhere('t.language <> :recExLang', { recExLang: 'en' });
+      qb.andWhere('(t.bpm < :recBpmLo OR t.bpm > :recBpmHi)', {
+        recBpmLo: 120,
+        recBpmHi: 140,
+      });
     }
 
     qb.orderBy('t.bpm', 'ASC').skip(offset).take(limit);

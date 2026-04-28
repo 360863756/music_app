@@ -1,14 +1,33 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { authenticate, optionalAuthenticate } from '../middleware/auth.middleware';
 import * as run from '../interfaces/http/run.controller';
+import { analyzeAndRecommend } from '../interfaces/http/analyze.controller';
 
 const router: import('express').Router = Router();
+
+// 录音识曲推荐专用：走内存存储（不落盘），15MB 上限；字段名固定 'audio'
+// 服务内部还会再校验一次大小，这里是第一道防线
+const audioUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 },
+});
 
 router.get('/tracks', run.searchTracks);
 router.get('/tracks/:id', run.getTrack);
 router.post('/bpm/classify', run.classifyBpm);
 router.get('/onboarding/reference-tracks', run.onboardingReferenceTracks);
 router.post('/onboarding/recommend', run.onboardingRecommend);
+// 未入库歌名 → iTunes 试听 → BPM 检测 → 入库
+router.post('/probe-track', run.probeTrackHandler);
+
+// 听一段音频 → 推荐节奏类似的歌；登录可选（匿名也能用）
+router.post(
+  '/analyze-and-recommend',
+  optionalAuthenticate,
+  audioUpload.single('audio'),
+  analyzeAndRecommend,
+);
 
 router.get('/templates', run.listMotionTemplates);
 router.get('/templates/:code', run.getMotionTemplate);

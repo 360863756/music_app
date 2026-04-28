@@ -19,6 +19,13 @@ export interface TrackSearchCriteria {
   random?: boolean;
   /** 跳过 count(*) 查询；前端分页只在乎 items.length 时可以省一次扫表 */
   noCount?: boolean;
+  /**
+   * 推荐位过滤：true 时排除"非推荐曲目"——
+   *   - 英文歌（language='en'）：用户未明示搜索英文不主动推
+   *   - BPM ∈ [120, 140]：散步偏快、慢跑偏慢的灰区，更适合竞走/极慢舞步
+   * 用户在搜索页显式查询时该开关应保持 false，结果照常展示这些歌。
+   */
+  recommend?: boolean;
 }
 
 export interface ITrackRepository {

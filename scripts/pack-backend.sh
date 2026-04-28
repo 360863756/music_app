@@ -85,8 +85,9 @@ for entry in "$SRC"/*; do
   skip=0
   case "$name" in
     node_modules|dist|.DS_Store) skip=1 ;;
-    .env)                        skip=1 ;;  # 真实密钥
-    .env.example)                skip=0 ;;  # 模板要留
+    .env)                        skip=1 ;;  # 真实密钥（dev 本地 .env，不上线）
+    .env.example)                skip=0 ;;  # 模板要留，方便服务器手动 cp 兜底
+    .env.production)             skip=1 ;;  # 单独处理：作为 `.env` 烧进 tarball（见下方）
     .env.*)                      skip=1 ;;  # 其他 .env.xxx 视作本地
     *.log)                       skip=1 ;;
   esac
@@ -94,6 +95,18 @@ for entry in "$SRC"/*; do
   cp -a "$entry" "$OUT/"
 done
 shopt -u dotglob nullglob
+
+# --- 烧入生产环境密钥 ---
+# 把 backend/.env.production（gitignored，含真实密码）拷贝为 app_backend/.env，
+# 这样服务器 `docker compose up` 自动读到生产值，不需要再 vi .env 手填。
+# .env.production 不存在时不报错，回落到"服务器上自己 cp .env.example .env"流程。
+PROD_ENV="$SRC/.env.production"
+if [[ -f "$PROD_ENV" ]]; then
+  cp -a "$PROD_ENV" "$OUT/.env"
+  echo "🔐 已从 backend/.env.production 烧入 app_backend/.env"
+else
+  echo "ℹ️  未找到 backend/.env.production —— 服务器上需手动 cp .env.example .env 并填值"
+fi
 
 # --- 输出 ---
 # Windows Git Bash 下 tar 自带；cf -czf 压缩后方便 scp
@@ -127,8 +140,13 @@ if [[ -f "$TAR" ]]; then
   echo "  mkdir -p /opt/run_app && cd /opt/run_app"
   echo "  tar -xzf /tmp/$(basename "$TAR")"
   echo "  cd app_backend"
-  echo "  cp .env.example .env && vi .env"
-  echo "  docker compose up -d --build"
+  if [[ -f "$OUT/.env" ]]; then
+    echo "  # tarball 已自带 .env（来自 backend/.env.production），无需手填"
+    echo "  docker compose up -d --build"
+  else
+    echo "  cp .env.example .env && vi .env   # 填 MYSQL_ROOT_PASSWORD / JWT_SECRET"
+    echo "  docker compose up -d --build"
+  fi
 else
   echo "  直接把 $OUT/ 整个目录 rsync/scp 到服务器 /opt/run_app/app_backend/"
 fi

@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import { connectDB } from './config/database';
 import authRoutes from './routes/auth.routes';
 import runRoutes from './routes/run.routes';
+import musicRoutes from './routes/music.routes';
 import { wireApplication } from './composition/container';
 
 dotenv.config();
@@ -30,6 +31,7 @@ app.use(
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/run', runRoutes);
+app.use('/api/music', musicRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

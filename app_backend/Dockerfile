@@ -26,6 +26,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8666
 
+# 录音识别用 ffmpeg 解码任意格式音频为 PCM，必须系统级安装
+RUN apk add --no-cache ffmpeg
+
 RUN corepack enable
 
 COPY package.json pnpm-lock.yaml ./

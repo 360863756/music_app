@@ -4,6 +4,7 @@ import { parseMotionForm } from '../../domain/motion/MotionForm';
 import { parseSpeedFeel } from '../../domain/motion/SpeedFeel';
 import { AppDataSource } from '../../config/database';
 import { TrackEntity } from '../../infrastructure/persistence/Track.entity';
+import { probeTrack } from '../../services/track-probe.service';
 
 function num(q: unknown): number | undefined {
   if (q === undefined || q === null || q === '') return undefined;
@@ -40,6 +41,7 @@ export async function searchTracks(req: Request, res: Response) {
       offset: num(req.query.offset),
       random: req.query.random === 'true' || req.query.random === '1',
       noCount: req.query.noCount === 'true' || req.query.noCount === '1',
+      recommend: req.query.recommend === 'true' || req.query.recommend === '1',
       referenceBpm,
     });
     res.json(result);
@@ -109,6 +111,36 @@ export async function onboardingRecommend(req: Request, res: Response) {
     res.json(result);
   } catch (e: any) {
     res.status(500).json({ message: e.message });
+  }
+}
+
+/**
+ * POST /api/run/probe-track  body: { title, artist? }
+ * 用户搜了一首本地曲库没有的歌，前端把名字甩过来 → iTunes 拿 30s 试听 →
+ * detectBpm → 入库。详见 services/track-probe.service.ts。
+ *
+ * 响应区分 ok / 失败 reason，让前端能给不同文案：
+ *   ok=true:           {ok:true, source, track, detection?}
+ *   not_found:         iTunes 没找到 / 试听 URL 不可用 → 引导用户去录音页
+ *   preview_failed:    下载失败                       → 让用户稍后重试
+ *   detect_failed:     算法没出节奏                   → 让用户稍后重试 / 录音
+ */
+export async function probeTrackHandler(req: Request, res: Response) {
+  try {
+    const title = (req.body?.title as string | undefined)?.toString().trim() || '';
+    const artist = (req.body?.artist as string | undefined)?.toString().trim() || '';
+    if (!title) {
+      return res.status(400).json({ ok: false, reason: 'not_found', message: '请提供歌名' });
+    }
+    const out = await probeTrack(title, artist);
+    if (!out.ok) {
+      // 业务失败用 200，让前端按 reason 渲染不同 UI；HTTP 错误码留给真正的服务故障
+      return res.json(out);
+    }
+    return res.json(out);
+  } catch (e: any) {
+    console.error('[probeTrackHandler] 内部错误：', e);
+    return res.status(500).json({ ok: false, reason: 'detect_failed', message: e?.message || '服务器错误' });
   }
 }
 
