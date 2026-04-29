@@ -8,7 +8,10 @@ WORKDIR /app
 # corepack 自带 pnpm，用 lockfile 装依赖更快更稳
 RUN corepack enable
 
-COPY package.json pnpm-lock.yaml ./
+# .npmrc 必须跟 package.json 一起 COPY 进来，pnpm install 才会读到里面的
+# `registry=https://registry.npmmirror.com/`，否则在国内服务器走默认 npmjs.org
+# 的 build 步会 ERR_SOCKET_TIMEOUT 单步要 15-20 分钟（线上加镜像后 1-2 分钟）
+COPY package.json pnpm-lock.yaml .npmrc ./
 RUN pnpm install --frozen-lockfile
 
 COPY tsconfig.json ./
@@ -31,7 +34,8 @@ RUN apk add --no-cache ffmpeg
 
 RUN corepack enable
 
-COPY package.json pnpm-lock.yaml ./
+# 同 builder 段：把 .npmrc 一起 COPY，pnpm install 走 npmmirror 镜像
+COPY package.json pnpm-lock.yaml .npmrc ./
 RUN pnpm install --frozen-lockfile --prod \
     && pnpm store prune
 

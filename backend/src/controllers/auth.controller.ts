@@ -10,7 +10,6 @@ import { createSmsSender } from '../services/sms.service';
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 const userRepository = AppDataSource.getRepository(User);
 const smsSender = createSmsSender();
-const IS_DEV = process.env.NODE_ENV !== 'production';
 
 /* ============== 校验工具 ============== */
 
@@ -114,9 +113,20 @@ export const sendSmsCode = async (req: Request, res: Response) => {
 
     await smsSender.send(phone, issued.code, scene);
 
-    // 开发/Mock 模式下把验证码回传给前端，方便联调；真实厂商永远不回
+    // 是否把验证码回传给前端，**完全由 SmsSender 实现的 echoCodeInDevResponse
+    // 决定，不再看 NODE_ENV**：
+    //   - MockSmsSender.echoCodeInDevResponse = true   → 永远回传 devCode
+    //   - AliyunSmsSender.echoCodeInDevResponse = false → 永远不回传
+    // 安全模型：你切到 SMS_PROVIDER=aliyun 的瞬间，devCode 自动停止外露，
+    // 不需要靠 NODE_ENV 当二道闸。
+    //
+    // 为什么不再用 NODE_ENV 当门：线上跑 docker compose 时 NODE_ENV 写死
+    // production，但阿里云签名还没审下来这段时间 SMS_PROVIDER 必须留 mock，
+    // 此时 App 既收不到真短信、devCode 又被 NODE_ENV 挡住 —— 唯一拿验证码
+    // 的途径是 SSH 上服务器看 api 日志，体验非常差。索性把判断收敛到
+    // sender 实现里，谁负责发短信谁说能不能露 devCode。
     const payload: any = { message: '验证码已发送', expiresInSec: 300 };
-    if (IS_DEV && smsSender.echoCodeInDevResponse) {
+    if (smsSender.echoCodeInDevResponse) {
       payload.devCode = issued.code;
     }
     return res.json(payload);

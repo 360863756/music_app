@@ -13,9 +13,18 @@
  *   2. 在下面的 createSmsSender() 里加 case 'tencent': return new TencentSmsSender(...)
  *   3. 在 .env.example 里补一段配置说明
  *
- * 为什么开发环境 Mock 直接把验证码回传给前端：
- *   - 方便联调：真机调试时不用每次看后端终端
- *   - 只在 process.env.NODE_ENV !== 'production' 时才回传，生产环境永远不回
+ * 验证码是否回传给前端的安全模型（**不依赖 NODE_ENV**）：
+ *   - MockSmsSender.echoCodeInDevResponse = true   → controller 永远回传 devCode
+ *   - AliyunSmsSender.echoCodeInDevResponse = false → controller 永远不回传
+ *
+ * 设计权衡：
+ *   - 之前版本叠加 NODE_ENV !== 'production' 当二道闸，但生产环境暂用
+ *     SMS_PROVIDER=mock（厂商签名还没审下来）这段时间 App 拿不到 devCode
+ *     就只能 SSH 看后端日志，体验极差。
+ *   - 现在把判断**完全交给 sender 实现**：谁负责发短信谁说能不能露 devCode。
+ *     SMS_PROVIDER=mock 等于明确"我现在不真发短信，正在测试"，那回传 devCode
+ *     是合理的；切到 aliyun 时 echoCodeInDevResponse=false 永远不回传，
+ *     生产安全不退化。
  */
 
 import type { SmsScene } from './sms-code.store';
