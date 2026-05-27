@@ -5,8 +5,8 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# corepack 自带 pnpm，用 lockfile 装依赖更快更稳
-RUN corepack enable
+# lockfile v9 对应 pnpm 9；勿用 corepack 默认最新 pnpm 11（需 Node 22+）
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 # .npmrc 必须跟 package.json 一起 COPY 进来，pnpm install 才会读到里面的
 # `registry=https://registry.npmmirror.com/`，否则在国内服务器走默认 npmjs.org
@@ -32,7 +32,7 @@ ENV PORT=8666
 # 录音识别用 ffmpeg 解码任意格式音频为 PCM，必须系统级安装
 RUN apk add --no-cache ffmpeg
 
-RUN corepack enable
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 # 同 builder 段：把 .npmrc 一起 COPY，pnpm install 走 npmmirror 镜像
 COPY package.json pnpm-lock.yaml .npmrc ./

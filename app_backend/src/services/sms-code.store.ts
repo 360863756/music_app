@@ -20,7 +20,7 @@
  *   - 'register' / 'login' / 'reset' / 'bind'
  */
 
-export type SmsScene = 'register' | 'login' | 'reset' | 'bind';
+export type SmsScene = 'register' | 'login' | 'reset' | 'bind' | 'delete_account';
 
 interface CodeRecord {
   code: string;

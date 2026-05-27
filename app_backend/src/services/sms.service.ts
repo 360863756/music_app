@@ -70,6 +70,7 @@ export function createSmsSender(): SmsSender {
             login: maskTpl(cfg.templateMap.login),
             reset: maskTpl(cfg.templateMap.reset),
             bind: maskTpl(cfg.templateMap.bind),
+            delete_account: maskTpl(cfg.templateMap.delete_account),
             default: maskTpl(cfg.defaultTemplate),
           })}`,
       );

@@ -34,7 +34,7 @@ function isValidPassword(s: string): boolean {
   return s.length >= 6 && s.length <= 32;
 }
 
-const VALID_SCENES: SmsScene[] = ['register', 'login', 'reset', 'bind'];
+const VALID_SCENES: SmsScene[] = ['register', 'login', 'reset', 'bind', 'delete_account'];
 function isValidScene(s: any): s is SmsScene {
   return typeof s === 'string' && (VALID_SCENES as string[]).includes(s);
 }
@@ -103,6 +103,22 @@ export const sendSmsCode = async (req: Request, res: Response) => {
       }
       if (existing && existing.id.toString() !== myId.toString()) {
         return res.status(400).json({ message: '该手机号已被其他账号绑定' });
+      }
+    }
+    if (scene === 'delete_account') {
+      const myId = (req as any).userId;
+      if (!myId) {
+        return res.status(401).json({ message: '请先登录' });
+      }
+      const me = await userRepository.findOne({ where: { id: parseInt(myId) } });
+      if (!me) {
+        return res.status(404).json({ message: '用户不存在' });
+      }
+      if (!me.phone) {
+        return res.status(400).json({ message: '当前账号未绑定手机号，请使用密码验证注销' });
+      }
+      if (phone !== me.phone) {
+        return res.status(400).json({ message: '请使用本账号绑定的手机号' });
       }
     }
 
@@ -488,6 +504,49 @@ export const getCurrentUser = async (req: Request, res: Response) => {
     return res.json({ user: publicUser(user) });
   } catch (error: any) {
     console.error('[getCurrentUser] error:', error);
+    return res.status(500).json({ message: '服务异常，请稍后再试' });
+  }
+};
+
+export const deleteAccount = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).userId;
+    if (!userId) return res.status(401).json({ message: '未登录' });
+
+    const { password, smsCode } = req.body || {};
+    const user = await userRepository.findOne({ where: { id: parseInt(userId) } });
+    if (!user) return res.status(404).json({ message: '用户不存在' });
+
+    let verified = false;
+
+    if (smsCode && typeof smsCode === 'string' && user.phone) {
+      const verify = smsCodeStore.verify(user.phone, 'delete_account', smsCode);
+      if (!verify.ok) {
+        return res.status(400).json({ message: verify.reason });
+      }
+      verified = true;
+    } else if (password && typeof password === 'string' && user.password) {
+      const ok = await bcrypt.compare(password, user.password);
+      if (!ok) {
+        return res.status(400).json({ message: '密码错误' });
+      }
+      verified = true;
+    }
+
+    if (!verified) {
+      if (user.phone) {
+        return res.status(400).json({ message: '请填写短信验证码，或改用密码验证' });
+      }
+      if (user.password) {
+        return res.status(400).json({ message: '请填写当前密码以确认注销' });
+      }
+      return res.status(400).json({ message: '无法验证身份，请先绑定手机号或设置密码' });
+    }
+
+    await userRepository.remove(user);
+    return res.json({ message: '账号已注销，您的个人数据将按隐私政策删除或匿名化处理' });
+  } catch (error: any) {
+    console.error('[deleteAccount] error:', error);
     return res.status(500).json({ message: '服务异常，请稍后再试' });
   }
 };

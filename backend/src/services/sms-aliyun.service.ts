@@ -90,7 +90,10 @@ export class AliyunSmsSender implements SmsSender {
   }
 
   async send(phone: string, code: string, scene: SmsScene): Promise<void> {
-    const tplCode = this.templateMap[scene] || this.defaultTemplate;
+    let tplCode = this.templateMap[scene] || this.defaultTemplate;
+    if (!tplCode && scene === 'delete_account') {
+      tplCode = this.templateMap.reset;
+    }
     if (!tplCode) {
       // 启动时已校验过 hasAny，这里通常走不到；防御性兜底
       throw new Error(`AliyunSmsSender: 没有为场景 ${scene} 配置模板`);
@@ -162,11 +165,15 @@ export function readAliyunSmsConfigFromEnv(): AliyunSmsConfig {
   const signName = (process.env.ALIYUN_SMS_SIGN_NAME || '').trim();
   const endpoint = (process.env.ALIYUN_SMS_ENDPOINT || '').trim() || undefined;
 
+  const resetTpl = (process.env.ALIYUN_SMS_TEMPLATE_RESET || '').trim() || undefined;
   const templateMap: Partial<Record<SmsScene, string>> = {
     register: (process.env.ALIYUN_SMS_TEMPLATE_REGISTER || '').trim() || undefined,
     login: (process.env.ALIYUN_SMS_TEMPLATE_LOGIN || '').trim() || undefined,
-    reset: (process.env.ALIYUN_SMS_TEMPLATE_RESET || '').trim() || undefined,
+    reset: resetTpl,
     bind: (process.env.ALIYUN_SMS_TEMPLATE_BIND || '').trim() || undefined,
+    // 注销账号与找回密码同为验证码短信，未单独申请模板时复用 reset
+    delete_account:
+      (process.env.ALIYUN_SMS_TEMPLATE_DELETE_ACCOUNT || '').trim() || resetTpl,
   };
   const defaultTemplate = (process.env.ALIYUN_SMS_TEMPLATE_DEFAULT || '').trim() || undefined;
 

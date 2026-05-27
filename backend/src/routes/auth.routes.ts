@@ -9,6 +9,7 @@ import {
   sendSmsCode,
   wechatLogin,
   getCurrentUser,
+  deleteAccount,
 } from '../controllers/auth.controller';
 import { authenticate, optionalAuthenticate } from '../middleware/auth.middleware';
 
@@ -35,5 +36,7 @@ router.post('/wechat', wechatLogin);
 
 /* 当前登录用户 */
 router.get('/me', authenticate, getCurrentUser);
+
+router.post('/delete-account', authenticate, deleteAccount);
 
 export default router;
